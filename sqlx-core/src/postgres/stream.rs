@@ -84,9 +84,9 @@ impl PgStream {
                 Message::ErrorResponse | Message::NoticeResponse => {
                     let response = Response::read(self.stream.buffer())?;
 
-                    if response.severity.is_error() {
+                    if response.severity()?.is_error() {
                         // This is an error, bubble up as one immediately
-                        return Err(crate::Error::Database(Box::new(PgError(response))));
+                        return Err(crate::Error::Database(Box::new(PgError { response, query: None })));
                     }
 
                     // TODO: Provide some way of receiving these non-critical

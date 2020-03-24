@@ -81,7 +81,7 @@ pub struct PgConnection {
     pub(super) next_statement_id: u32,
     pub(super) is_ready: bool,
 
-    pub(super) cache_statement: HashMap<Box<str>, StatementId>,
+    pub(super) cache_statement: HashMap<Arc<str>, StatementId>,
     pub(super) cache_statement_columns: HashMap<StatementId, Arc<HashMap<Box<str>, usize>>>,
     pub(super) cache_statement_formats: HashMap<StatementId, Arc<[TypeFormat]>>,
 

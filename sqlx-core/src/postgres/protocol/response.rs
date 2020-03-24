@@ -1,5 +1,6 @@
 use crate::io::Buf;
 use std::str::{self, FromStr};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum Severity {
@@ -45,45 +46,46 @@ impl FromStr for Severity {
 
 #[derive(Debug)]
 pub(crate) struct Response {
-    pub(crate) severity: Severity,
-    pub(crate) code: Box<str>,
-    pub(crate) message: Box<str>,
-    pub(crate) detail: Option<Box<str>>,
-    pub(crate) hint: Option<Box<str>>,
-    pub(crate) position: Option<usize>,
-    pub(crate) internal_position: Option<usize>,
-    pub(crate) internal_query: Option<Box<str>>,
-    pub(crate) where_: Option<Box<str>>,
-    pub(crate) schema: Option<Box<str>>,
-    pub(crate) table: Option<Box<str>>,
-    pub(crate) column: Option<Box<str>>,
-    pub(crate) data_type: Option<Box<str>>,
-    pub(crate) constraint: Option<Box<str>>,
-    pub(crate) file: Option<Box<str>>,
-    pub(crate) line: Option<usize>,
-    pub(crate) routine: Option<Box<str>>,
+    // always present fields:
+    // S: localized Severity
+    severity: Box<str>,
+    // C: SQLSTATE code
+    code: Box<str>,
+    // M: Message
+    message: Box<str>,
+    // all optional fields
+    fields: BTreeMap<u8, Box<str>>,
 }
 
 impl Response {
+    /// Lazily parse the severity
+    pub(crate) fn severity(&self) -> crate::Result<Severity> {
+        // non-localized Severity
+        self.fields.get(&b'V')
+            .unwrap_or(&self.severity)
+            .parse()
+    }
+
+    pub(crate) fn code(&self) -> &str { &self.code }
+
+    pub(crate) fn message(&self) -> &str { &self.message }
+
+    pub (crate) fn field(&self, tag: u8) -> Option<&str> {
+        match tag {
+            // support fetching these in case users expect them
+            b'S' => Some(&self.severity),
+            b'C' => Some(&self.code),
+            b'M' => Some(&self.message),
+            _ => self.fields.get(&tag)
+        }
+    }
+
     pub(crate) fn read(mut buf: &[u8]) -> crate::Result<Self> {
         let mut code = None::<Box<str>>;
         let mut message = None::<Box<str>>;
         let mut severity = None::<Box<str>>;
-        let mut severity_non_local = None::<Severity>;
-        let mut detail = None::<Box<str>>;
-        let mut hint = None::<Box<str>>;
-        let mut position = None::<usize>;
-        let mut internal_position = None::<usize>;
-        let mut internal_query = None::<Box<str>>;
-        let mut where_ = None::<Box<str>>;
-        let mut schema = None::<Box<str>>;
-        let mut table = None::<Box<str>>;
-        let mut column = None::<Box<str>>;
-        let mut data_type = None::<Box<str>>;
-        let mut constraint = None::<Box<str>>;
-        let mut file = None::<Box<str>>;
-        let mut line = None::<usize>;
-        let mut routine = None::<Box<str>>;
+
+        let mut other = BTreeMap::new();
 
         loop {
             let field_type = buf.get_u8()?;
@@ -99,10 +101,6 @@ impl Response {
                     severity = Some(field_value.into());
                 }
 
-                b'V' => {
-                    severity_non_local = Some(field_value.parse()?);
-                }
-
                 b'C' => {
                     code = Some(field_value.into());
                 }
@@ -111,87 +109,13 @@ impl Response {
                     message = Some(field_value.into());
                 }
 
-                b'D' => {
-                    detail = Some(field_value.into());
-                }
-
-                b'H' => {
-                    hint = Some(field_value.into());
-                }
-
-                b'P' => {
-                    position = Some(
-                        field_value
-                            .parse()
-                            .or(Err(protocol_err!("expected int, got: {}", field_value)))?,
-                    );
-                }
-
-                b'p' => {
-                    internal_position = Some(
-                        field_value
-                            .parse()
-                            .or(Err(protocol_err!("expected int, got: {}", field_value)))?,
-                    );
-                }
-
-                b'q' => {
-                    internal_query = Some(field_value.into());
-                }
-
-                b'w' => {
-                    where_ = Some(field_value.into());
-                }
-
-                b's' => {
-                    schema = Some(field_value.into());
-                }
-
-                b't' => {
-                    table = Some(field_value.into());
-                }
-
-                b'c' => {
-                    column = Some(field_value.into());
-                }
-
-                b'd' => {
-                    data_type = Some(field_value.into());
-                }
-
-                b'n' => {
-                    constraint = Some(field_value.into());
-                }
-
-                b'F' => {
-                    file = Some(field_value.into());
-                }
-
-                b'L' => {
-                    line = Some(
-                        field_value
-                            .parse()
-                            .or(Err(protocol_err!("expected int, got: {}", field_value)))?,
-                    );
-                }
-
-                b'R' => {
-                    routine = Some(field_value.into());
-                }
-
                 _ => {
-                    // TODO: Should we return these somehow, like in a map?
-                    return Err(protocol_err!(
-                        "received unknown field in Response: {}",
-                        field_type
-                    )
-                    .into());
+                    other.insert(field_type, field_value.into());
                 }
             }
         }
 
-        let severity = severity_non_local
-            .or_else(move || severity?.as_ref().parse().ok())
+        let severity = severity
             .ok_or(protocol_err!(
                 "did not receieve field `severity` for Response"
             ))?;
@@ -205,20 +129,7 @@ impl Response {
             severity,
             code,
             message,
-            detail,
-            hint,
-            internal_query,
-            where_,
-            schema,
-            table,
-            column,
-            data_type,
-            constraint,
-            file,
-            routine,
-            line,
-            position,
-            internal_position,
+            fields: other,
         })
     }
 }
@@ -237,9 +148,9 @@ mod tests {
 
         assert_matches!(message.severity, Severity::Notice);
         assert_eq!(&*message.code, "42710");
-        assert_eq!(&*message.file.unwrap(), "extension.c");
-        assert_eq!(message.line, Some(1656));
-        assert_eq!(&*message.routine.unwrap(), "CreateExtension");
+        assert_eq!(&*message[b'F'], "extension.c");
+        assert_eq!(&*message[b'L'], "1656");
+        assert_eq!(&*message[b'R'], "CreateExtension");
         assert_eq!(
             &*message.message,
             "extension \"uuid-ossp\" already exists, skipping"

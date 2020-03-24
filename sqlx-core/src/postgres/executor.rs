@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::sync::Arc;
 
 use futures_core::future::BoxFuture;
 use futures_util::{stream, StreamExt, TryStreamExt};
@@ -8,12 +9,12 @@ use crate::arguments::Arguments;
 use crate::cursor::Cursor;
 use crate::describe::{Column, Describe};
 use crate::executor::{Execute, Executor, RefExecutor};
+use crate::postgres::{PgArguments, PgConnection, PgCursor, PgRow, PgTypeInfo, Postgres};
 use crate::postgres::protocol::{
     self, CommandComplete, Field, Message, ParameterDescription, ReadyForQuery, RowDescription,
     StatementId, TypeFormat, TypeId,
 };
 use crate::postgres::types::SharedStr;
-use crate::postgres::{PgArguments, PgConnection, PgCursor, PgRow, PgTypeInfo, Postgres};
 use crate::row::Row;
 
 impl PgConnection {
@@ -39,6 +40,11 @@ impl PgConnection {
 
             id
         }
+    }
+
+    fn get_cached_query(&self, query: &str) -> Arc<str> {
+        self.cache_statement.get_key_value(query)
+            .map_or_else(|| query.into(), |(k, _)| Arc::clone(k))
     }
 
     pub(crate) fn write_describe(&mut self, d: protocol::Describe) {
