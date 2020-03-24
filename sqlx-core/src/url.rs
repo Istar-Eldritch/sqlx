@@ -42,13 +42,18 @@ impl Url {
         self.0.port().unwrap_or(default)
     }
 
-    pub fn username(&self) -> Option<&str> {
+    pub fn username(&self) -> Option<Cow<str>> {
         let username = self.0.username();
 
         if username.is_empty() {
             None
         } else {
-            Some(username)
+            let decoded = percent_encoding::percent_decode_str(username);
+                Some(
+                    decoded
+                        .decode_utf8()
+                        .expect("percent-encoded username contained non-UTF-8 bytes")
+                )
         }
     }
 

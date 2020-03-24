@@ -150,7 +150,7 @@ impl MySqlConnection {
         self.send(HandshakeResponse {
             client_collation: COLLATE_UTF8MB4_UNICODE_CI,
             max_packet_size: MAX_PACKET_SIZE,
-            username: url.username().unwrap_or("root"),
+            username: url.username().map(|c| c.into_owned()).unwrap_or(String::from("root")).as_str(),
             database: url.database(),
             auth_plugin,
             auth_response,
